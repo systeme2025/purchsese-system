@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Purchase & Income Record System</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    input, select, textarea, button {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    table, th, td {
+      border: 1px solid #ddd;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+    }
+    .btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-logout {
+      background: #e74c3c;
+    }
+    .btn-export {
+      background: #2ecc71;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Purchase & Income Record System (Admin Controlled)</h2>
+
+    <div id="authSection">
+      <input type="text" id="authUsername" placeholder="Username" />
+      <input type="password" id="authPassword" placeholder="Password" />
+      <button class="btn" onclick="login()">Login</button>
+      <button class="btn" onclick="signup()">Sign Up</button>
+    </div>
+
+    <div id="mainSection" style="display:none;">
+      <div>
+        <span id="userInfo"></span>
+        <button class="btn btn-logout" onclick="logout()">Logout</button>
+      </div>
+
+      <h3>Purchase Record</h3>
+      <input type="text" id="buyerInput" placeholder="Buyer Name">
+      <input type="text" id="product" placeholder="Product Name">
+      <input type="number" id="quantity" placeholder="Quantity">
+      <select id="unit">
+        <option value="pcs">pcs</option>
+        <option value="kg">kg</option>
+        <option value="liters">liters</option>
+      </select>
+      <input type="number" id="price" placeholder="Price per unit (RWF)">
+      <input type="date" id="date">
+      <textarea id="comment" placeholder="Comment"></textarea>
+      <button class="btn" onclick="addPurchase()">Add Purchase</button>
+      <button class="btn btn-export" onclick="exportPurchasesToExcel()">Export Purchases to Excel</button>
+
+      <table id="purchaseTable">
+        <thead>
+          <tr><th>Product</th><th>Qty</th><th>Unit</th><th>Price</th><th>Total</th><th>Buyer</th><th>Date</th><th>Comment</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div>
+        Grand Total: <span id="totalAmount">0</span> RWF<br>
+        Total by Buyer: <span id="buyerSummary"></span>
+      </div>
+
+      <h3>Income Record</h3>
+      <input id="fullName" placeholder="Full Name">
+      <input type="number" id="incomeAmount" placeholder="Amount">
+      <input type="date" id="incomeDate">
+      <textarea id="incomeComment" placeholder="Comment"></textarea>
+      <button class="btn" onclick="addIncome()">Add Income</button>
+      <button class="btn btn-export" onclick="exportIncomeToPDF()">Export Income PDF</button>
+
+      <table id="incomeTable">
+        <thead><tr><th>Full Name</th><th>Amount</th><th>Date</th><th>Comment</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+let users = JSON.parse(localStorage.getItem('users')) || [];
+let currentUser = null;
+let purchases = [];
+let incomes = [];
+
+function signup() {
+  const username = document.getElementById('authUsername').value;
+  const password = document.getElementById('authPassword').value;
+  if (!users.find(u => u.username === username)) {
+    users.push({ username, password });
+    localStorage.setItem('users', JSON.stringify(users));
+    alert('Sign up successful!');
+  } else {
+    alert('Username already exists!');
+  }
+}
+
+function login() {
+  const username = document.getElementById('authUsername').value;
+  const password = document.getElementById('authPassword').value;
+  const found = users.find(u => u.username === username && u.password === password);
+  if (found) {
+    currentUser = username;
+    document.getElementById('authSection').style.display = 'none';
+    document.getElementById('mainSection').style.display = 'block';
+    document.getElementById('userInfo').innerHTML = `Logged in as <strong>${currentUser}</strong>`;
+  } else {
+    alert('Invalid credentials');
+  }
+}
+
+function logout() {
+  currentUser = null;
+  document.getElementById('authSection').style.display = 'block';
+  document.getElementById('mainSection').style.display = 'none';
+}
+
+function addPurchase() {
+  const buyer = document.getElementById('buyerInput').value;
+  const product = document.getElementById('product').value;
+  const quantity = parseFloat(document.getElementById('quantity').value);
+  const unit = document.getElementById('unit').value;
+  const price = parseFloat(document.getElementById('price').value);
+  const date = document.getElementById('date').value;
+  const comment = document.getElementById('comment').value;
+
+  if (!buyer || !product || !quantity || !price || !date) {
+    alert('Please fill all required fields');
+    return;
+  }
+
+  const total = quantity * price;
+  purchases.push({ buyer, product, quantity, unit, price, total, date, comment });
+  renderPurchases();
+  document.querySelectorAll('#buyerInput, #product, #quantity, #price, #date, #comment').forEach(el => el.value = '');
+}
+
+function renderPurchases() {
+  const tbody = document.querySelector('#purchaseTable tbody');
+  tbody.innerHTML = '';
+  let total = 0;
+  const buyerTotals = {};
+
+  purchases.forEach(p => {
+    total += p.total;
+    buyerTotals[p.buyer] = (buyerTotals[p.buyer] || 0) + p.total;
+    tbody.innerHTML += `<tr><td>${p.product}</td><td>${p.quantity}</td><td>${p.unit}</td><td>${p.price}</td><td>${p.total}</td><td>${p.buyer}</td><td>${p.date}</td><td>${p.comment}</td></tr>`;
+  });
+
+  document.getElementById('totalAmount').textContent = total.toLocaleString();
+  document.getElementById('buyerSummary').innerHTML = Object.entries(buyerTotals)
+    .map(([buyer, t]) => `${buyer}: ${t.toLocaleString()} RWF`).join(' | ');
+}
+
+function exportPurchasesToExcel() {
+  const ws_data = [["Product", "Quantity", "Unit", "Price", "Total", "Buyer", "Date", "Comment"]];
+  purchases.forEach(p => {
+    ws_data.push([p.product, p.quantity, p.unit, p.price, p.total, p.buyer, p.date, p.comment]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Purchases");
+  XLSX.writeFile(wb, "purchase_records.xlsx");
+}
+
+function addIncome() {
+  const fullName = document.getElementById('fullName').value;
+  const amount = parseFloat(document.getElementById('incomeAmount').value);
+  const date = document.getElementById('incomeDate').value;
+  const comment = document.getElementById('incomeComment').value;
+  if (!fullName || !amount || !date) {
+    alert('Please complete income form.');
+    return;
+  }
+  incomes.push({ fullName, amount, date, comment });
+  renderIncome();
+  document.querySelectorAll('#fullName, #incomeAmount, #incomeDate, #incomeComment').forEach(el => el.value = '');
+}
+
+function renderIncome() {
+  const tbody = document.querySelector('#incomeTable tbody');
+  tbody.innerHTML = '';
+  incomes.forEach(i => {
+    tbody.innerHTML += `<tr><td>${i.fullName}</td><td>${i.amount}</td><td>${i.date}</td><td>${i.comment}</td></tr>`;
+  });
+}
+
+function exportIncomeToPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 10;
+  doc.setFontSize(12);
+  doc.text("Income Records", 14, y);
+  y += 10;
+  incomes.forEach((i, index) => {
+    doc.text(`${index + 1}. ${i.fullName}, ${i.amount} RWF, ${i.date}, ${i.comment}`, 14, y);
+    y += 8;
+  });
+  doc.save("income_records.pdf");
+}
+</script>
+</body>
+</html>
